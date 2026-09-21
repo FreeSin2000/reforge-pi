@@ -400,6 +400,7 @@ pi -r        # 列出所有会话，按 /name 起的名字挑
 reforge/
 ├── AGENTS.md          # 给 pi 的约定（自动加载）
 ├── HOWTO.md           # 本文件，给人看
+├── README.md          # 仓库门面
 ├── .gitignore         # 忽略 src/
 ├── src/               # 各项目源码树（不入库）
 │   └── linux-6.12/
