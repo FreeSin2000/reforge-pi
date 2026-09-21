@@ -1,0 +1,21 @@
+# ── 各项目源码树：不入库（体积大、可重新获取）──
+/src/
+
+# ── 索引 / 编译数据库产物（若出现在 notes/ 里）──
+cscope.out
+cscope.in.out
+cscope.po.out
+tags
+TAGS
+compile_commands.json
+.clangd/
+.cache/
+
+# ── pi 本地资源（包安装目录不入库）──
+.pi/npm/
+.pi/git/
+
+# ── 杂项 ──
+.DS_Store
+*.swp
+*~
