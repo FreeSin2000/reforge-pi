@@ -100,3 +100,16 @@
 - **状态**：已定（工具就绪；**旧图本身尚未重画**）
 - **去向**：若要 promote 进 `03-main-path.md`，先按新规范重画
 - **标签**：#skill #ascii #自查
+
+### J-0006 · 2026-09-21 · 图重画落盘 + lint --md
+
+- **类型**：决定
+- **承接**：J-0005（旧图不合规、待重画）。
+- **动作**：
+  1. 按 `tech-diagrams` 规范重画 5 张加载链路图（纯 ASCII、框内无中文、宽度 69~76），落盘 `notes/linux-6.12/diagrams/kernel-loading.md`；
+  2. `lint.py` 加 `--md` 模式（直接检查 markdown 内的 fenced code block），5 块全绿。
+- **证据**：`notes/linux-6.12/diagrams/kernel-loading.md`；`lint.py --md` 输出。
+- **置信度**：高
+- **状态**：已定
+- **去向**：可作 `03-main-path.md` 的最上游素材（尚未 promote）
+- **标签**：#启动 #ascii #落盘
