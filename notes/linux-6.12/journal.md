@@ -145,3 +145,22 @@
 - **去向**：可补进 `diagrams/kernel-loading.md`（构建链图）
 - **后续**：图 6（构建链）/ 图 7（运行链）已补入 `diagrams/kernel-loading.md`。
 - **标签**：#启动 #vmlinux #自解压
+
+### J-0009 · 2026-09-21 · boot protocol 三入口 / code32_start 语义
+
+- **类型**：发现（含对图的修正）
+- **问题**：16-bit setup 是否经 `protected_mode_jump` 跳 `code32_start`？`code32_start` 是什么？现代 GRUB 是否跳过 setup？
+- **尝试解释**：
+  1. ✅ **16-bit**：`pm.c` 的 `go_to_protected_mode()` 末行 `protected_mode_jump(boot_params.hdr.code32_start, ...)`；`pmjump.S` 置 CR0.PE、`ljmpl` 进 32-bit、最后 `jmpl *%eax`。
+  2. `code32_start` = **保护模式跳转地址**，默认 = 内核加载地址（`boot.rst:534`），默认值 `0x100000`（`header.S:271-273`）；relocatable 内核加载到非标准地址时 bootloader 必须改它（`boot.rst:671-673`）。
+  3. ✅ **现代 GRUB 跳过 setup**——因为 boot protocol 有**三种入口**（`boot.rst:1337-1444`）：
+     - **16-bit**：跑 setup → `protected_mode_jump` → `code32_start`
+     - **32-bit**：保护模式、paging off，直接跳 `code32_start`（= kernel start = `startup_32`）
+     - **64-bit**：64-bit、paging on，直接跳 `code32_start + 0x200`（= `startup_64`；对应 `compressed/head_64.S` 的 `.org 0x200`）
+     - EFI handover（deprecated）/ EFI stub
+- **含义**：64-bit loader **直接进 `startup_64`**，不经过 `startup_32` 的 32-bit 部分；`startup_32`(offset 0) / `startup_64`(offset 0x200) 的偏移是 **ABI**。→ 图 1 / 图 5 需补注。
+- **证据**：`boot/pm.c` 末行；`boot/pmjump.S`；`boot.rst:526-541,671-673,1195-1207,1337-1444`；`header.S:271-273`；`compressed/head_64.S:83,286`。
+- **置信度**：高
+- **状态**：已定
+- **去向**：更新 `diagrams/kernel-loading.md`（补三入口 / 图1,5 注）
+- **标签**：#启动 #boot-protocol #code32_start

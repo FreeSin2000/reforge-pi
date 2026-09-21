@@ -23,7 +23,7 @@
    |   4. fill boot_params: e820 / cmdline / initrd              |
    |   5. enter 32-bit protected mode, jump code32_start          |
    +--------------------------------------------------------------+
-        |  (modern GRUB skips the 16-bit setup below)
+        |  (modern bootloader: 32/64-bit protocol, skips setup)
         v
  stage 1 - 16-bit setup (legacy boot-sector path)         real mode
  ------------------------------------------------------------------------
@@ -46,7 +46,8 @@
         v
  stage 2 - self-extracting stub              arch/x86/boot/compressed/
  ------------------------------------------------------------------------
-   protected mode (32-bit)
+   entry points (ABI): startup_32 @ 0x0, startup_64 @ 0x200   [fig 8]
+   protected mode (32-bit)  <- from 16-bit setup or 32-bit protocol
    head_64.S:83   startup_32             first insn of prot-mode kernel
         |- cli / cld
         |- relocate delta -> %ebp (short call/pop)
@@ -199,19 +200,24 @@
 ## 图 5 · 特权级 / 执行环境时间轴
 
 ```text
- real mode (16)     | protected mode (32)     | long mode (64)
- -------------------+-------------------------+---------------------------->
- header.S:_start    |                         |
- start_of_setup     |                         |
- boot/main.c main() |                         |
- boot/pm.c jump --->| startup_32 (stub,32bit) |
-                    |   `- lret ------------->| startup_64 (stub,64bit)
-                    |                         |   `- jmp ---+
-                    |                         |            v
-                    |                         | kernel startup_64
-                    |                         |   -> common_startup_64
-                    |                         |   -> x86_64_start_kernel
-                    |                         |   -> start_kernel
+ real mode (16)     | protected mode (32)       | long mode (64)
+ -------------------+---------------------------+---------------------------->
+ [16-bit protocol]  |                           |
+   setup _start     |                           |
+   main.c / pm.c    |                           |
+   protected_mode_jump --> startup_32 (stub)    |
+                    |     `- lret ------------->| startup_64 (stub)
+ -------------------+---------------------------+             |
+ [32-bit protocol]  | jump @ code32_start       |             |
+                    | (= startup_32, skip setup)|             |
+ -------------------+---------------------------+             |
+ [64-bit protocol]  | jump @ code32_start+0x200 (= startup_64) |
+                    |                           |   `- jmp ---+
+                    |                           |            v
+                    |                           | kernel startup_64
+                    |                           |   -> common_startup_64
+                    |                           |   -> x86_64_start_kernel
+                    |                           |   -> start_kernel
 ```
 
 一句话结论：三条入口最终都汇聚到 64-bit 的 `startup_64`（真内核），再进入 C 语言的 `start_kernel`。
@@ -271,3 +277,26 @@
 ```
 
 一句话结论：stub 自己解压（解压器**编译时选定**，非运行时探测），解压后还要 `parse_elf` + `handle_relocations`，最后 `jmp` 到真内核入口。
+
+## 图 8 · boot protocol 三入口
+
+```text
+ boot protocol - three ways to enter the same bzImage
+ ---------------------------------------------------------------------
+   [16-bit]  jump to setup real-mode entry (loaded at 0x90000)
+             -> boot/main.c -> boot/pm.c
+             -> protected_mode_jump(code32_start)      boot/pm.c:127
+             -> code32_start (default 0x100000 = startup_32)
+
+   [32-bit]  CPU: 32-bit prot mode, paging OFF, %esi = boot_params
+             -> jump to code32_start  (= kernel start = startup_32)
+
+   [64-bit]  CPU: 64-bit mode, paging ON (identity map), %rsi = bp
+             -> jump to code32_start + 0x200  (= startup_64, ABI)
+
+   [EFI]     PE/COFF entry (EFI stub) / efi_handover (deprecated)
+ ---------------------------------------------------------------------
+   offsets: startup_32 @ 0x0, startup_64 @ 0x200  (compressed/head_64.S)
+```
+
+一句话结论：`code32_start`（默认 0x100000）是 protected-mode 入口；16-bit protocol 经 setup 间接到达，32/64-bit protocol 由 bootloader 直接跳入（差别是 offset 0 vs 0x200）。
