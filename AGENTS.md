@@ -17,6 +17,7 @@ reforge/
 │   ├── _tooling/          # 工具与索引：现状清单 + 安装脚本
 │   └── <project>/         # 每个项目一个目录
 │       ├── index.md           # 项目总览 + 状态 + Open Questions + Reading Log
+│       ├── journal.md         # 探索日志（动态问答时间线）
 │       ├── 01-structure.md    # 项目结构
 │       ├── 02-build.md        # 构建方案
 │       ├── 03-main-path.md    # 主干路径
@@ -62,6 +63,33 @@ reforge/
 - 探索分叉用 `/fork`，回看历史用 `/tree`；换方向时 `/fork`，不要在同一会话里无限堆。
 - 每次开工先读 `notes/<project>/index.md` 恢复上下文，不要全靠会话记忆。
 - 长任务接着做用 `pi -c`。
+
+## 探索协议（动态问答与记录）
+
+动态探索的主线：**你翻代码提问 → pi 带你定位 → 结论落进笔记**。分三层承载：
+
+| 层 | 载体 | 存什么 | 入库 |
+|----|------|--------|:----:|
+| 原始 | pi 会话 JSONL（`~/.pi/agent/sessions/`） | 全部问答、命令、工具调用 | 否（自动保存） |
+| 时间线 | `notes/<project>/journal.md` | 值得留存的问答结论 | 是 |
+| 稳定 | 01~04 / `glossary.md` / `map.md` / `_concepts/` | 提炼后的结论 | 是 |
+
+**默认行为**：对话照常；当一次回答构成「关于该项目的可复用事实或结论」时，在答案后**追加一条 journal 记录**（不必等用户说）。
+
+**三档去向**：
+- 纯查位置 / 一次性 → **不记**（如「这个宏在哪定义」，除非进 glossary）；
+- 形成理解但未定 / 局部 → **journal**；
+- 稳定、可复用 → **promote** 进 01~04 / glossary / map / `_concepts/`，并在 journal 条目留 `→` 指针。
+
+**触发词**（用户可用）：
+- 「记一下 / 记这里」→ 现在就把当前结论写进 journal；
+- 「只是看看 / 别记」→ 本次不入 journal；
+- 「parking」→ 写进 `index.md` 的 Open Questions；
+- 「promote」→ 把 journal 里某条提升进正式文档。
+
+**会话收尾**：把 journal 中已稳定的条目 promote，更新 `index.md` 的 Open Questions 与 Reading Log。
+
+> 原则：**原始记录靠会话，策展靠 journal，稳定知识靠 01~04 与 _concepts**。journal 不自动进上下文，按需读取（见 `notes/_template/journal.md`）。
 
 ## 压缩纪律
 

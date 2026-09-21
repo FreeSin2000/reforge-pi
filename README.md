@@ -64,8 +64,8 @@ pi
 | `03-main-path.md` | 正常启动/运行的主干调用链是什么？（忽略错误处理） |
 | `04-debug-plan.md` | 将来要动态调试该怎么做、需要准备什么？ |
 
-配套记录：`index.md`（状态 + Open Questions + Reading Log）、`glossary`/`map`（检索层，按需）、
-`notes/_concepts/`（跨项目抽象）。
+配套记录：`index.md`（状态 + Open Questions + Reading Log）、`journal.md`（动态问答时间线）、
+`glossary`/`map`（检索层，按需）、`notes/_concepts/`（跨项目抽象）。
 
 ## 依赖
 
