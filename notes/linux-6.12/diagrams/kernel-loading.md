@@ -137,7 +137,7 @@
 +--------------------------------------+ EOF
 ```
 
-一句话结论：bootloader 只读 `0x1F1` 的 setup header 来"认识"内核；`0x200` 起的 16-bit setup 现代 GRUB 会跳过；`protected-mode` 段就是"压缩内核 + 自解压 stub"。
+一句话结论：bootloader 只读 `0x1F1` 的 setup header 来“认识”内核；`0x200` 起的 16-bit setup 现代 GRUB 会跳过；`protected-mode` 段就是“压缩内核 + 自解压 stub”。（原料如何造出来，见 §图 6。）
 
 ## 图 3 · 内存布局（解压前 / 后）
 
@@ -215,3 +215,59 @@
 ```
 
 一句话结论：三条入口最终都汇聚到 64-bit 的 `startup_64`（真内核），再进入 C 语言的 `start_kernel`。
+
+## 图 6 · 构建链：`vmlinux` 怎么变成 bzImage
+
+```text
+ build time - how bzImage is assembled
+ ---------------------------------------------------------------------
+   [all obj-y] --ar--> vmlinux.a --ld--> vmlinux.o
+                                            |  scripts/Makefile.vmlinux
+                                            v
+                                        vmlinux            (ELF, uncompressed)
+                                            | objcopy -R .comment -S
+                                            v
+                                       vmlinux.bin         (trimmed, still ELF)
+                                            | + vmlinux.relocs (if relocatable)
+                                            v
+                                     vmlinux.bin.all
+                                            | gzip  (+ append u32 orig size)
+                                            v
+                                     vmlinux.bin.gz        (+ 4-byte size)
+                                            |
+        +-----------------------------------+
+        |  mkpiggy.c --> piggy.S:  .incbin "vmlinux.bin.gz"
+        v
+   stub vmlinux  [ decomp code | .rodata..compressed data ]
+        |  boot/tools/build.c: setup.bin + vmlinux.bin + CRC32
+        v
+      bzImage
+```
+
+一句话结论：`vmlinux` 是未压缩 ELF 的“真身”；被 objcopy 瘦身、压缩后由 `mkpiggy.c` 用 `.incbin` **捎带**进解压 stub，再和 `setup.bin` 拼成 bzImage。
+
+## 图 7 · 自解压 stub 运行链
+
+```text
+ run time - what the self-extracting stub does
+ ---------------------------------------------------------------------
+   startup_32 (32-bit) -> startup_64 (64-bit) -> .Lrelocated
+        |
+        v
+   extract_kernel(boot_params, output)              misc.c:405
+        |- choose_random_location()                 KASLR base
+        v
+   decompress_kernel(outbuf, virt_addr)             misc.c:355
+        |- __decompress(input_data, input_len,
+        |               outbuf, output_len, ...)
+        |     input_data  = piggy .incbin blob
+        |     __decompress = ONE algo, fixed at BUILD time
+        |       (misc.c:65-89 #include lib/decompress_<algo>.c)
+        |- parse_elf(outbuf)      -> entry point      misc.c:294
+        `- handle_relocations(...)
+        |
+        v
+   return output + entry_offset  --> jmp *%rax
+```
+
+一句话结论：stub 自己解压（解压器**编译时选定**，非运行时探测），解压后还要 `parse_elf` + `handle_relocations`，最后 `jmp` 到真内核入口。

@@ -113,3 +113,35 @@
 - **状态**：已定
 - **去向**：可作 `03-main-path.md` 的最上游素材（尚未 promote）
 - **标签**：#启动 #ascii #落盘
+
+### J-0007 · 2026-09-21 · bzImage 是什么 / 全称 / 历史
+
+- **类型**：发现
+- **问题**：`bzImage` 是什么？全称与历史？
+- **尝试解释**：
+  - 全称 **big zImage**。源码旁证：`arch/x86/boot/header.S:273` 注释 `# 0x100000 = default for big kernel`；`boot.rst` 未逐字写 “big zImage”。（全称置信度：中——公认解释 + 旁证，非文档逐字）
+  - `z` = 压缩自解压（gzip/zlib）。`bzImage` 把压缩内核加载到 **0x100000（1MB）**，突破 `zImage` 的 **0x10000（<640K，≤512K）** 限制。
+  - 时间线：Protocol 2.00（kernel **1.3.73**，1.3.x 开发系列）引入 bzImage（`boot.rst:20`）；`zImage` 已 deprecated（`boot.rst:32`）。
+  - 现代 x86 实际只用 bzImage；`all: bzImage` 为默认（`arch/x86/Makefile:303,308`）。
+- **证据**：`boot.rst:20,32,245,1195-1207`；`arch/x86/boot/header.S:273`；`arch/x86/boot/Makefile:19,68`；`arch/x86/Makefile:300,306,308`。
+- **置信度**：高（地址/历史）/ 中（全称措辞）
+- **状态**：已定
+- **去向**：可补进 `diagrams/kernel-loading.md` 作背景段
+- **标签**：#启动 #bzImage #历史
+
+### J-0008 · 2026-09-21 · vmlinux 与 self-extracting stub 原理
+
+- **类型**：发现
+- **问题**：vmlinux 是什么？自解压 stub 是什么、原理？
+- **尝试解释**：
+  - **vmlinux** = 内核完整真身，**未压缩 ELF**（含符号），由 `vmlinux.o` + 链接脚本链接（`Makefile:1165` → `scripts/Makefile.vmlinux`；`vmlinux.lds.S:41 ENTRY(phys_startup_64)`）。bootloader **不直接加载**它。
+  - **stub** = `arch/x86/boot/compressed/` 编译出的 `vmlinux`，即 bzImage 的 protected-mode 部分；官方定性 “self-extracting executable”（`init/Kconfig:273`）。
+  - **piggyback**：`mkpiggy.c` 生成 `piggy.S`，用 `.incbin` 把 `vmlinux.bin.gz` 嵌进 `.rodata..compressed`，并从压缩文件尾部读 u32 原长作 `z_output_len`。
+  - **解压器编译时选定**：`misc.c:65-89` 条件 `#include` 一个 `lib/decompress_<algo>.c`（提供 `STATIC __decompress`）；默认 gzip（`init/Kconfig:271`）。**≠** 运行时魔数分发（`lib/decompress.c` 的 `decompress_method` 是 initramfs 用）。
+  - **运行**：`extract_kernel` → `decompress_kernel` → `__decompress` → `parse_elf` → `handle_relocations` → `entry` → `jmp`。
+- **证据**：`Makefile:1142,1165`；`scripts/Makefile.vmlinux:34-36`；`vmlinux.lds.S:41`；`arch/x86/boot/compressed/Makefile:8-20`；`mkpiggy.c:52-63`；`misc.c:65-89,294,355-373`；`init/Kconfig:271-273`。
+- **置信度**：高
+- **状态**：已定
+- **去向**：可补进 `diagrams/kernel-loading.md`（构建链图）
+- **后续**：图 6（构建链）/ 图 7（运行链）已补入 `diagrams/kernel-loading.md`。
+- **标签**：#启动 #vmlinux #自解压
