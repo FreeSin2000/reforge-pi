@@ -225,3 +225,92 @@
 - **状态**：已定
 - **去向**：`diagrams/kernel-loading.md` 可补“三个 ELF / lds”关系
 - **标签**：#构建 #链接脚本 #stub
+
+### J-0014 · 2026-09-21 · startup_32/64 属于哪个产物
+
+- **类型**：发现
+- **问题**：`startup_32` / `startup_64` 在内核里还是 setup.bin？源码如何体现？
+- **尝试解释**：**在 protected-mode kernel（vmlinux.bin / stub），不在 setup.bin**。
+  - 定义：`boot/compressed/head_64.S:83 startup_32`（offset 0，注释 “32bit entry is 0 and it is ABI”）、`:286 startup_64`（`.org 0x200`，注释 “64bit entry is 0x200 and it is ABI”）；`boot/compressed/head_32.S:46 startup_32`。
+  - 编译：`boot/compressed/Makefile:88` `vmlinux-objs-y := ... head_$(BITS).o` → 编入 stub。
+  - 定位：`boot/compressed/vmlinux.lds.S` 把 HEAD_TEXT 放 offset 0，`ENTRY(startup_64)`。
+  - setup.bin 的 `setup-y`（`boot/Makefile:23-27`）**不含 head_*.o**；其入口是 `header.S:_start` → `start_of_setup` → `main`（main.o）。
+  - 同名陷阱：全树 **5 处 startup_32**（compressed 头㉂㉁2、kernel/head_32、realmode trampoline 头㉂㉁2）、**3 处 startup_64**（compressed、kernel/head_64、realmode trampoline_64）。
+- **证据**：上述 `path:line`。
+- **置信度**：高
+- **状态**：已定
+- **去向**：可补 `diagrams/kernel-loading.md` 图 9/10（入口符号归属）
+- **标签**：#启动 #stub #head
+
+### J-0015 · 2026-09-21 · 解压发生在哪：startup 符号 vs startup 序列
+
+- **类型**：澄清
+- **问题**：“不是在 startup 被解压缩吗？”
+- **尝试解释**：**解压在 stub 的启动序列里，但不在 `startup_32/64` 符号内**。
+  - `startup_32`(head_64.S:83) / `startup_64`(:286) 只做入场准备（GDT/段/栈/页表/长模式/算目标/拷压缩数据到缓冲区末尾），`startup_64` 末尾 `jmp .Lrelocated`(:448)。
+  - `.Lrelocated`(:453) 才 `call extract_kernel`(:477)。
+  - `extract_kernel`(misc.c:405) → `decompress_kernel`(misc.c:355) → `__decompress`(misc.c:365)（`lib/decompress_<algo>.c`）真正 inflate。
+  - 所以：若“startup”指整段启动序列/stub，对；若指 `startup_32/64` 符号本身，不准。
+- **证据**：`head_64.S:83,286,448,453,477`；`misc.c:355,365,405,517`。
+- **置信度**：高
+- **状态**：已定
+- **标签**：#启动 #stub #解压
+
+### J-0016 · 2026-09-21 · 两个“vmlinux”：stub 与真内核同名
+
+- **类型**：澄清 / 发现（命名陷阱）
+- **问题**：startup_32/64 不是 vmlinux 里的符号吗？
+- **尝试解释**：**对——但要区分两个都叫 `vmlinux` 的产物**：
+  - **(A) `arch/x86/boot/compressed/vmlinux`** = **stub**（`compressed/Makefile:110` 链接 `vmlinux-objs-y` = head_$(BITS).o + misc.o + piggy.o…）。含 `startup_32`@0 / `startup_64`@0x200。其 objcopy → `arch/x86/boot/vmlinux.bin`（`boot/Makefile:73`）= bzImage 的 protected-mode 段。
+  - **(B) 顶层 `./vmlinux`**（`Makefile:1165`）= **真内核**（高位链接）。含 `kernel/head_64.S:38 startup_64` + `phys_startup_64`。被压缩成 `vmlinux.bin.gz`（`compressed/Makefile:126`）嵌入 (A)。
+  - 所以“startup 是 vmlinux 里的符号”对 (A) 成立；用户没说错，是**命名复用**造成歧义。
+  - **重名产物**：`vmlinux` ×2（compressed/=stub、顶/=真内核）、`vmlinux.bin` ×2（`compressed/vmlinux.bin`=真内核瘦身；`boot/vmlinux.bin`=stub raw）。
+- **证据**：`compressed/Makefile:20,110,114,126,153`；`boot/Makefile:73`；顶层 `Makefile:1165`；`kernel/vmlinux.lds.S:41`。
+- **置信度**：高
+- **状态**：已定
+- **去向**：可作 `diagrams/kernel-loading.md` 图 10（两个 vmlinux / 命名复用）
+- **标签**：#启动 #vmlinux #命名
+
+### J-0017 · 2026-09-21 · stub 如何生成
+
+- **类型**：发现
+- **问题**：stub 是如何生成的？
+- **尝试解释**：stub 由**两股输入**汇合：
+  - **(A) 行李 = 压缩的真内核**：顶层 `vmlinux` --objcopy--> `compressed/vmlinux.bin`（`:114`）--+relocs→`vmlinux.bin.all`（`:123`）--gzip+`size_append`(追 u32 原长)-->`vmlinux.bin.gz`（`:126`；`Makefile.lib:334`）--`mkpiggy`-->`piggy.S`(`.incbin`)（`:153`）-->`piggy.o`。
+  - **(B) stub 自己的代码**：`vmlinux-objs-y`（`:88-108`）= head_$(BITS).o + misc.o + string.o + cmdline.o + error.o + cpuflags.o + kernel_info.o（+ kaslr.c/pgtable_64.c/idt_64.o …）。
+  - **(A)+(B)** `ld -T vmlinux.lds` → `compressed/vmlinux`（**STUB ELF, PIE**）（`:110`）→ objcopy → `boot/vmlinux.bin`（raw）→ build.c 拼 bzImage。
+  - 重定位：`arch/x86/Makefile.postlink` 在 X86_NEED_RELOCS 时导出 `vmlinux.relocs` 并从 vmlinux 剥离 .rel*。
+- **证据**：`compressed/Makefile:20,88-110,114,123,126,153`；`scripts/Makefile.lib:334`；`arch/x86/Makefile.postlink`；`boot/Makefile:68,73`。
+- **置信度**：高
+- **状态**：已定
+- **去向**：与 `diagrams/kernel-loading.md` 图 6（构建链）对应
+- **标签**：#构建 #stub #piggy
+
+### J-0018 · 2026-09-21 · stub -> 真内核的分界点
+
+- **类型**：确认
+- **假设**：从 `boot/compressed/head_64.S` 跳到 `kernel/head_64.S` 才是真正进入内核？
+- **尝试解释**：**基本对**。
+  - 分界点：`compressed/head_64.S:483` 的 `jmp *%rax`（`.Lrelocated` 末尾）。
+  - 目标：`parse_elf` 返回 `ehdr.e_entry - LOAD_PHYSICAL_ADDR`（`misc.c:346`）；真内核 ELF 的 `e_entry` = `ENTRY(phys_startup_64)`（`kernel/vmlinux.lds.S:41,117`）= `startup_64 - LOAD_OFFSET` → `kernel/head_64.S:38 startup_64`。
+  - 所以跳到 `kernel/head_64.S` 的 `startup_64` 后，即“真内核”（解压后长期运行的那份）。
+  - 措辞：stub 也是内核源码的一部分（广义内核），但狭义“真内核”从 `kernel/head_64.S` 开始；stub 是临时解压器。
+  - 交接：boot_params 经 `%rsi`→`%r15`→`%rdi`；后续 `startup_64`→`common_startup_64`→`x86_64_start_kernel`(`head64.c`)。
+- **证据**：`head_64.S:453,477,483`；`misc.c:346,405,517`；`kernel/vmlinux.lds.S:41,117`；`kernel/head_64.S:38`。
+- **置信度**：高
+- **状态**：已定
+- **标签**：#启动 #stub #真内核
+
+### J-0019 · 2026-09-21 · 用户梳理校正：.S→.C 的分界
+
+- **类型**：澄清
+- **用户的梳理**：stub 解压+处理 boot_params → 跳真内核 startup → start_kernel（.S→.C）→ init/main.c
+- **尝试解释**：**前两条对；第 3、4 条要纠正**：
+  - **.S→.C 的分界不是 `start_kernel`**，而是 `kernel/head64.c:425 x86_64_start_kernel`（由 `kernel/head_64.S` 的 `callq *initial_code` 调用，`head_64.S:413,474`）。
+  - **`start_kernel` 就在 `init/main.c`**（不是“之后才是 main.c”）。链路：`x86_64_start_kernel` → `x86_64_start_reservations`（都在 head64.c）→ `start_kernel()`（head64.c:507 调用，定义在 `init/main.c`）。
+  - 另外“初始化硬件”更准确是“初始化 **CPU 执行环境**（GDT/段/栈/页表/长模式）”；外设/内存管理初始化在 `start_kernel` 之后（`setup_arch` 等）。
+- **正确分层**：[asm] `compressed/head_64.S` → [asm] `kernel/head_64.S` → [C] `head64.c` → [C] `init/main.c`
+- **证据**：`kernel/head_64.S:38,188,413,474`；`head64.c:425,491,507`；`init/main.c start_kernel`。
+- **置信度**：高
+- **状态**：已定
+- **标签**：#启动 #主干 #start_kernel

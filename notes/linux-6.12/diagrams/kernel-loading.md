@@ -328,3 +328,32 @@
 ```
 
 一句话结论：三段镜像各有自己的链接脚本——真内核高位链接（`phys_startup_64`）、stub 从 0 起（`startup_32/64` + piggy）、setup 从 0 起（`_start`，`hdr` 固定 0x1F1）；最后由 `build.c` 拼成一个 bzImage。
+
+## 图 10 · 汇编 → C 的分层与 `start_kernel` 入口
+
+```text
+ asm -> C: the handoff into start_kernel
+ ---------------------------------------------------------------------
+   [asm] arch/x86/boot/compressed/head_64.S   (stub)
+     startup_32 :83 -> startup_64 :286 -> .Lrelocated :453
+       |- extract_kernel()   decompress         misc.c:405
+       `- jmp *%rax  :483     -> real kernel entry
+
+   [asm] arch/x86/kernel/head_64.S            (real kernel)
+     startup_64 :38 -> common_startup_64 :188
+       `- callq *initial_code  :413
+          (initial_code = x86_64_start_kernel, :474)
+
+   [ C ] arch/x86/kernel/head64.c             <== .S -> .C boundary
+     x86_64_start_kernel      :425
+       `- x86_64_start_reservations  :491
+            `- start_kernel()    (call at head64.c:507)
+
+   [ C ] init/main.c
+     start_kernel()           <-- defined HERE (not a separate step)
+       `- rest_init() / arch_call_rest_init()
+            `- kernel_init -> user-space init
+ ---------------------------------------------------------------------
+```
+
+一句话结论：`.S -> .C` 的分界是 `kernel/head64.c:x86_64_start_kernel`（**不是** `start_kernel`）；`start_kernel` 本身就定义在 `init/main.c`，它是 C 启动主体，不是“进 C”的跳板。
