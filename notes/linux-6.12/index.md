@@ -14,7 +14,7 @@
 
 - [ ] 01-structure —— 项目结构
 - [ ] 02-build —— 构建方案
-- [ ] 03-main-path —— 主干路径
+- [ ] 03-main-path —— 主干路径（**上游 boot→`start_kernel` 已 promote**；之内待做）
 - [ ] 04-debug-plan —— 动态调试方案
 
 ## Milestones（「能跑起来」的标志性节点）
@@ -35,11 +35,24 @@
 
 ## 当前 Open Questions
 
-- 最小可引导产物是什么？（vmlinux / bzImage / initramfs 的关系）
-- 只读核心子系统时，如何建索引（cscope / universal-ctags / clangd）而不编译全树？
-- 主干路径从 x86_64 的 `arch/x86/boot/` 还是 `init/main.c` 切入？
-- 动态调试用 qemu `-s -S` + gdb，还是 kgdb？哪个准备成本更低？
-- 是否需要 git 历史（`git log -S`）？若要，考虑 `--filter=blob:none` 部分克隆。
+**已答（归档）**
+- ~~最小可引导产物是什么？~~ → **bzImage**；`vmlinux` 是未压缩 ELF 原料，`Image` 未压缩 raw，`zImage` 已弃用（J-0007 / J-0012）。
+- ~~主干路径从 `arch/x86/boot/` 还是 `init/main.c` 切入？~~ → 从 **boot** 切入；现已到 `start_kernel` 门口（图 1 / 图 10）。
+- ~~硬件信息是否都在 boot_params？~~ → 不是；只有 e820/显示/EFI/RSDP 指针等最小集（J-0020）。
+
+**待解（可能阻塞下一步）**
+- 动态调试用 qemu `-s -S` + gdb，还是 kgdb？哪个准备成本更低？（→ `04-debug-plan`）
+- 只读核心子系统时，如何建索引（cscope / universal-ctags / clangd）而不编译全树？（→ `_tooling`）
+- 是否需要 git 历史（`git log -S`）？`src/linux-6.12` 是 tarball，无 `.git`。
+
+**Parking（加载链的边角，暂不追）**
+- EFI stub 路径细节（`compressed/efi.c` `efi_pe_entry`）——三入口之一。
+- KASLR 实现（`choose_random_location`）。
+- SMP CPU 唤醒（`secondary_startup_64`、`realmode/rm/trampoline_*`）。
+- 内存加密启动（SEV/TDX：`mem_encrypt.S`、`tdx.c`）。
+- 5-level paging 切换（`configure_5level_paging`）。
+- `setup_data` 链 / `hardware_subarch`。
+- legacy setup 每步 BIOS 调用细节（价值低）。
 
 ## Reading Log
 
@@ -47,6 +60,7 @@
 |------|------|-------------|------|
 | 2026-09-21 | 建立脚手架 | 工作区约定 + 四份笔记模板 + 工具清单就位 | AGENTS.md / notes/_tooling/ |
 | 2026-09-21 | 内核加载链路 | 5 张合规 ASCII 图落盘；建 tech-diagrams skill；沉淀改增量 | `notes/linux-6.12/diagrams/kernel-loading.md` / journal J-0002~J-0006 |
+| 2026-09-21 | 加载链路扩展 | 图 6~10（构建链 / 自解压 / 三入口 / lds / 汇编→C）；bzImage 史、两个 vmlinux、stub 生成、硬件信息多来源 | `diagrams/kernel-loading.md` / journal J-0007~J-0020 |
 
 ## 快速事实
 

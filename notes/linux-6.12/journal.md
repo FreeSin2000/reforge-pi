@@ -314,3 +314,28 @@
 - **置信度**：高
 - **状态**：已定
 - **标签**：#启动 #主干 #start_kernel
+
+### J-0020 · 2026-09-21 · 硬件信息从哪来：boot_params vs 内核探测
+
+- **类型**：澄清
+- **问题**：硬件信息都是 bootloader 填进 boot_params 的吗？
+- **尝试解释**：**不全是**。boot_params 只装“引导早期必需的最小集”：
+  - **在里面**：`e820_table`（内存映射，固件→loader）、`screen_info`/`edid_info`、`efi_info`、`acpi_rsdp_addr`（**仅指针**，表在固件内存）、ist/apm/edd（旧）。
+  - **不在里面**（内核自己搞）：CPUID（CPU 特性，`common.c:320,342`）、PCI 枚举（`pcibios_scan_root`/`pci_acpi_scan_root`）、ACPI 表解析（`acpi_boot_init` `setup.c:1146`）、DMI/SMBIOS 扫描（`dmi_scan_machine` `dmi_scan.c:673,722,829`，0xF0000）、各设备驱动。
+  - 用户空间工具溯源：lspci→内核 PCI 枚举；/proc/cpuinfo→CPUID；dmidecode→DMI 表；acpidump→ACPI 表；/proc/meminfo←e820（此支起点在 boot_params）。
+  - x86 用 ACPI+PCI+CPUID+DMI 自描述；ARM/ARM64 用 **DTB**（bootloader 传 DTB 指针，非 boot_params）。
+- **证据**：`drivers/firmware/dmi_scan.c:673,722,829`；`arch/x86/kernel/cpu/common.c:320,342`；`arch/x86/pci/legacy.c:27,33`、`arch/x86/pci/acpi.c:414`；`arch/x86/kernel/setup.c:1100,1146`；`arch/x86/kernel/acpi/boot.c:1774,1779`。
+- **置信度**：高
+- **状态**：已定
+- **标签**：#硬件 #boot_params #ACPI
+
+### J-0021 · 2026-09-21 · 增量检查点：加载链 promote 进 03-main-path
+
+- **类型**：决定（增量沉淀）
+- **动作**：把 J-0002~J-0020 的已定结论聚类 → 写入 `notes/linux-6.12/03-main-path.md`（入口 + 阶段 0~4 + 关键调用链 + 数据结构 + 锁/所有权 + 证据）；图 **引用** `diagrams/kernel-loading.md`（不复制）；阶段 5（`start_kernel` 之内）留待下一步。
+- **同时**：`index.md` Open Questions 三段化（已答/待解/Parking）+ Reading Log 补行；进度标“上游已 promote”。
+- **证据**：`notes/linux-6.12/03-main-path.md`；`index.md`。
+- **置信度**：高
+- **状态**：已定
+- **去向**：下一步 = 阶段 5 主干（setup_arch → rest_init → kernel_init）
+- **标签**：#沉淀 #main-path
