@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 是什么：单体宏内核操作系统，Linux 内核的长期支持版本，现代发行版的核心。
 > - 现在读到：内核加载链路（`arch/x86/boot` → `start_kernel`）已探索并成图。
-> - 下一步：坐实 `start_kernel` 之内的主干（`setup_arch` → `rest_init` → `init`）。
+> - 下一步：按「路线图」推进 **W1**（`start_kernel` 全景）。
 > - 卡在：无。
 >
 > 本文件保持**小而稳**：只放状态、问题、里程碑、Done-when 和四份文档的链接。细节都在 01~04。
@@ -16,6 +16,55 @@
 - [ ] 02-build —— 构建方案
 - [ ] 03-main-path —— 主干路径（**上游 boot→`start_kernel` 已 promote**；之内待做）
 - [ ] 04-debug-plan —— 动态调试方案
+
+## 路线图（进入内核主干，2026-09-21 规划）
+
+> 从 `start_kernel` 到用户空间 init，拆成 **4 个工作单元**（每个 ≈ 一个会话，建议 `/name` 命名）；之后进子系统专题。
+> 图集见 `diagrams/kernel-loading.md`；主要沉淀目标是 `03-main-path.md`。
+
+| 单元 | 主题 | 关键入口 | 产出 |
+|------|------|---------|------|
+| **W1** | `start_kernel` 全景（总纲） | `init/main.c:903` | 03 阶段5 上半（初始化序列 + 分类） |
+| **W2** | `setup_arch` 架构初始化 | `arch/x86/kernel/setup.c:729` | 03 + `_concepts`（memblock 等） |
+| **W3** | 早期基础设施（percpu/sched/rcu/irq/time/console） | 各 `*_init` | 03 阶段5 |
+| **W4** | `rest_init` → `kernel_init` → 用户空间 init | `init/main.c:701,1460` | 03 完成（Done-when）+ **M2** |
+| W5+ | 子系统专题：mm / sched / fs / net / … | 各子系统 | 专题笔记 |
+| 支线 | qemu+gdb 动态验证（M3/M4） | — | `04-debug-plan.md` |
+
+**单元完成判据**：能白板画出该段主干 + 说清锁/所有权；边角 parking。
+
+### 主题视角 · 主题 0：内核公共机制（“读内核的语言”）
+
+> **定位**：不属于任何单一子系统，但**所有主题都要用**。目标不是深入，而是**认识词汇**。
+> **Done-when**：能说清「用户调用 `read()` 怎么掉进内核」，并认识内核里最常见的公共 API（锁 / 分配 / `current`）。
+
+| 子主题 | 从哪进入 | 关键入口 | 为什么先学 |
+|--------|---------|---------|-----------|
+| 0.1 系统调用 | 早期汇编 + CPU 初始化 | `head_64.S:386`(EFER.SCE)、`cpu/common.c:2072 syscall_init`、`entry_64.S:87 entry_SYSCALL_64`、`entry/common.c:76 do_syscall_64`、`entry/syscalls/syscall_64.tbl` | 用户↔内核唯一大门；每个主题都以 syscall 为入口 |
+| 0.2 中断 / 异常 | `trap_init()` / `init_IRQ()` | `arch/x86/kernel/traps.c`、`arch/x86/kernel/irq/` | 与 syscall 同级的入口（IDT） |
+| 0.3 并发原语 | `lockdep_init()` / `locking_selftest()` | `include/linux/{spinlock,mutex,rcupdate}.h` | 读任何并发代码的前提 |
+| 0.4 内存分配 API | `mm_core_init` | `include/linux/{slab,gfp}.h` | 任何代码都在分配内存 |
+| 0.5 `current` / per-cpu | `setup_per_cpu_areas()` | `include/asm/current.h`、`include/linux/percpu-defs.h` | “当前进程”是所有代码的隐含上下文 |
+| 0.6 日志 / printk | `setup_log_buf()` / `console_init()` | `kernel/printk/` | 调试与观测的基础 |
+
+**读多深**：0.1 精读入口链路；0.2~0.6 只到“认识 API + 知道谁提供”。深入留给对应子系统主题。
+
+### 主题视角 · 主题 1：程序、进程、地址空间
+
+> **Done-when**：能白板画出「一个进程的 `task_struct` + `mm_struct` + VMA + 页表 从哪来、怎么建、怎么被 `exec` 替换」。
+> 路线 = 从 `start_kernel` 沿“能力递进”走到主题本体（执行顺序视角的 W1~W4 是同一段路）。
+
+| 阶段 | 进入点（`start_kernel` 的一步） | 关键入口（file:line） | 为主题提供 |
+|------|------------------------------|----------------------|-----------|
+| A 内核地址空间地基 | `setup_arch` → `paging_init` | `arch/x86/kernel/setup.c:729`、`arch/x86/mm/init_64.c:822` | 内核页表 / 直接映射（参照系） |
+| B 物理内存分配 | `mm_core_init` | `mm/mm_init.c:2636` | 页分配器 / slab（一切对象之母） |
+| C 进程/地址空间对象缓存 | `fork_init` / `proc_caches_init` / `anon_vma_init` / `thread_stack_cache_init` | `kernel/fork.c:1041,3156,412`、`mm/rmap.c:461` | `task_struct`/`mm_struct`/VMA/`anon_vma` 缓存 |
+| D PID + 调度 | `pid_idr_init` / `sched_init` | `kernel/pid.c:650` | 进程能被标识、被调度 |
+| E 第一个进程诞生 | `rest_init` → `user_mode_thread` → `kernel_clone` → `copy_process` | `init/main.c:701`、`kernel/fork.c:2854,2745,2118` | **进程从无到有** |
+| F 第一个程序执行 | `kernel_init` → `run_init_process` → `kernel_execve` → `do_execveat_common` → `load_elf_binary` | `init/main.c:1460,1378`、`fs/exec.c:1961,1876`、`fs/binfmt_elf.c:819` | **程序加载 + 地址空间替换** |
+| G 主题深入 | （本体，不再依赖 `start_kernel`） | `include/linux/sched.h:778`、`include/linux/mm_types.h:790,667` | `task_struct`/`mm_struct`/VMA/页表 |
+
+**读多深**：A~D 只需“知道提供了什么能力”；E/F 要看懂关键步骤；G 才是主题正文。
 
 ## Milestones（「能跑起来」的标志性节点）
 
