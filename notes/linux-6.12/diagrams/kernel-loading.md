@@ -300,3 +300,31 @@
 ```
 
 一句话结论：`code32_start`（默认 0x100000）是 protected-mode 入口；16-bit protocol 经 setup 间接到达，32/64-bit protocol 由 bootloader 直接跳入（差别是 offset 0 vs 0x200）。
+
+## 图 9 · 三份链接脚本 → 三个 ELF → 一个 bzImage
+
+```text
+ three linker scripts -> three ELFs -> one bzImage
+ ---------------------------------------------------------------------
+   [1] kernel/vmlinux.lds.S              arch/x86/kernel/
+       ENTRY(phys_startup_64)            LOAD_OFFSET=__START_KERNEL_map
+       => vmlinux                        (ELF, high-addr link) [real kernel]
+
+   [2] boot/compressed/vmlinux.lds.S     arch/x86/boot/compressed/
+       ENTRY(startup_64)  . = 0          HEAD_TEXT -> .head.text
+       => stub ELF (PIE)                 .rodata..compressed = piggy
+          | objcopy -R .comment -S
+          v
+       vmlinux.bin   (raw)
+
+   [3] boot/setup.ld                     arch/x86/boot/
+       ENTRY(_start)  . = 0              ASSERT(hdr == 0x1f1)
+       => setup.elf                      .signature: setup_sig=0x5a5aaa55
+          | objcopy -O binary
+          v
+       setup.bin   (16-bit real mode)
+ ---------------------------------------------------------------------
+   boot/tools/build.c:  bzImage = setup.bin + vmlinux.bin + CRC32
+```
+
+一句话结论：三段镜像各有自己的链接脚本——真内核高位链接（`phys_startup_64`）、stub 从 0 起（`startup_32/64` + piggy）、setup 从 0 起（`_start`，`hdr` 固定 0x1F1）；最后由 `build.c` 拼成一个 bzImage。

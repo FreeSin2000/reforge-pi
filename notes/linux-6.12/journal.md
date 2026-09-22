@@ -164,3 +164,64 @@
 - **状态**：已定
 - **去向**：更新 `diagrams/kernel-loading.md`（补三入口 / 图1,5 注）
 - **标签**：#启动 #boot-protocol #code32_start
+
+### J-0010 · 2026-09-21 · legacy setup 做了什么 / 现代谁代理
+
+- **类型**：发现
+- **问题**：legacy 16-bit setup 做了哪些事？现代 GRUB 是否代理了同样的事？
+- **尝试解释**：
+  - legacy setup（`boot/main.c` 的 `main()`）**13 步**：init_default_io_ops → copy_boot_params → console_init → init_heap → validate_cpu → set_bios_mode → detect_memory(e820/e801/88) → keyboard_init → query_ist → query_apm_bios → query_edd → set_video → go_to_protected_mode。
+  - **官方表述**（`zero-page.rst:6-8`）：boot_params 各字段 “should be **filled by bootloader or 16-bit real-mode setup code**” —— 二选一。所以现代 GRUB **是**代理了“参数填充”，但方式是直接写 boot_params，不是重跑 setup 代码。
+  - 数据落点/消费者不变：内核 `setup_arch` → `e820__memory_setup()` 读 `boot_params.e820_table`（`arch/x86/kernel/setup.c:836`）。
+  - 职责三分：① bootloader 接管（内存/显示/cmdline/initrd/boot_params）；② 内核后续接管（建 memblock、CPU 校验、early console）；③ 淘汰（APM/EDD/keyboard/IST，字段 OBSOLETE）。
+- **证据**：`boot/main.c:11-180`；`boot/memory.c:18-119`；`zero-page.rst:1-49`；`arch/x86/kernel/setup.c:836`。
+- **置信度**：高
+- **状态**：已定
+- **去向**：可作 `diagrams/kernel-loading.md` 图 8 的注
+- **标签**：#启动 #setup #boot-protocol
+
+### J-0011 · 2026-09-21 · boot_params 结构、字段与文档位置
+
+- **类型**：发现
+- **问题**：boot_params 有哪些字段？含义？文档里有描述吗？
+- **尝试解释**：
+  - `boot_params` = “**zero page**”，固定 **4096 B**、16 字节对齐（`main.c:36 BUILD_BUG_ON`）；bootloader / 16-bit setup 填，内核 `copy_bootdata()` 保存为全局。
+  - 四大块：① 固件/BIOS 信息（0x000-0x1F0：screen_info/apm_bios_info/ist_info/acpi_rsdp_addr/edid_info/efi_info…）；② `setup_header hdr`（0x1F1-0x268+，**就是 bzImage 头**）；③ `edd_mbr_sig_buffer`(0x290) 与 `e820_table[128]`(0x2D0)；④ `eddbuf`(0xD00)。
+  - **文档分两份**（易漏）：`boot.rst:185-268` 讲 `hdr` 字段（带 read/write/modify 语义）；`zero-page.rst:1-47` 讲其余字段。
+  - 结构体在 `arch/x86/include/uapi/asm/bootparam.h`（UAPI ABI）；子结构在 `screen_info.h`/`apm_bios.h`/`edd.h`/`asm/ist.h`/`video/edid.h`/`setup_data.h`。
+- **证据**：`uapi/asm/bootparam.h`；`boot.rst:185-268`；`zero-page.rst:1-47`；`boot/main.c:36`。
+- **置信度**：高
+- **状态**：已定
+- **去向**：可作 `diagrams/kernel-loading.md` 的 zero page 布局图（图 9?）
+- **标签**：#启动 #boot_params #zero-page
+
+### J-0012 · 2026-09-21 · code32_start 处到底是什么
+
+- **类型**：确认（核实用户假设）
+- **假设**：`code32_start` 处 = self-extracting stub + 压缩的保护模式 kernel？
+- **尝试解释**：**基本正确，但要精确**：
+  - `code32_start` 处是 bzImage 的 protected-mode 段，即 `compressed/vmlinux`——一个 **PIE ELF**。
+  - 它**不是两段独立的东西**：stub 是代码主体，压缩内核是它的 `.rodata..compressed` **数据段**（由 `piggy.S` 的 `.incbin` 嵌入）。**同一个 ELF**。
+  - offset 0 = `startup_32`（32-bit 入口，ABI）；offset 0x200 = `startup_64`（64-bit 入口，ABI）。
+  - bootloader 只搬这一段 + 跳入口；解压目标 `output` 由 `choose_random_location()` / `LOAD_PHYSICAL_ADDR` 定，**不一定 = code32_start**。
+- **证据**：`boot/Makefile:73`（vmlinux.bin ← compressed/vmlinux）；`compressed/Makefile:8-20`；`compressed/head_64.S:83,286`；`boot.rst:1191-1193`；`compressed/misc.c:405,517`。
+- **置信度**：高
+- **状态**：已定
+- **去向**：`diagrams/kernel-loading.md` 图 7 / 图 9 可补注
+- **标签**：#启动 #stub #code32_start
+
+### J-0013 · 2026-09-21 · boot 相关链接脚本（.lds.S / .ld）
+
+- **类型**：发现
+- **问题**：有没有 .ld 脚本？
+- **尝试解释**：有多个层级（`find arch/x86 -name '*.ld*'`）：
+  - `arch/x86/boot/compressed/vmlinux.lds.S` — **stub 的链接脚本**：`ENTRY(startup_64/32)`；`. = 0`（注释：head_64.S 假定 startup_32 在地址 0）；段 `.head.text`(HEAD_TEXT) / `.rodata..compressed`(piggy) / .text/.rodata/.data/.bss/.pgtable；DISCARD + ASSERT 掉 .got/.plt/.rel（PIE 约束）。
+  - `arch/x86/boot/setup.ld` — 16-bit setup：`ENTRY(_start)`；`. = 0`；`.bstext`(定位 495) / `.header` / `.entrytext`(start_of_setup)；`.signature` 里 `setup_sig=0x5a5aaa55`；ASSERT `_end<=0x8000`、**`hdr==0x1f1`**、`__end_init<=5*512`。
+  - `arch/x86/kernel/vmlinux.lds.S` — 真内核：`ENTRY(phys_startup_64)`；`LOAD_OFFSET=__START_KERNEL_map`。
+  - 其他：`realmode/rm/realmode.lds.S`、`entry/vdso/*.lds.S`、`scripts/module.lds.S`；通用宏 `include/asm-generic/vmlinux.lds.h`。
+- **彩蛋**：`setup.ld` 的 `ASSERT(hdr == 0x1f1)` 就是 boot protocol 里 **hdr 固定在 0x1F1** 的来源。
+- **证据**：`compressed/vmlinux.lds.S:15-27`；`setup.ld:8-70`；`kernel/vmlinux.lds.S:34-41`。
+- **置信度**：高
+- **状态**：已定
+- **去向**：`diagrams/kernel-loading.md` 可补“三个 ELF / lds”关系
+- **标签**：#构建 #链接脚本 #stub
